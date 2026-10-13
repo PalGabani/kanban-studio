@@ -72,12 +72,20 @@ function isProject(value: unknown): value is Project {
         stages.includes(task.stage as (typeof stages)[number]) &&
         ['Urgent', 'High', 'Medium', 'Low'].includes(task.priority as string) &&
         typeof task.assignee === 'string' &&
+        (task.startDate === undefined || task.startDate === '' || isCalendarDate(task.startDate)) &&
         typeof task.dueDate === 'string' &&
         Array.isArray(task.labels) &&
         task.labels.every((label) => typeof label === 'string') &&
         Array.isArray(task.comments) &&
         task.comments.every((comment) => comment && typeof comment.id === 'string' && typeof comment.author === 'string' && typeof comment.body === 'string' && typeof comment.createdAt === 'string')
     })
+}
+
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
 }
 
 export function useProjects() {

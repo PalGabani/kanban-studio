@@ -15,11 +15,13 @@ export type Task = {
   id: string
   key?: string
   issueType?: IssueType
+  assigneeId?: string | null
   title: string
   description: string
   stage: Stage
   priority: Priority
   assignee: string
+  startDate?: string
   dueDate: string
   labels: string[]
   comments: Comment[]
@@ -29,6 +31,7 @@ export type Project = {
   id: string
   key?: string
   issueCounter?: number
+  organizationId?: string
   name: string
   description: string
   color: string
@@ -36,9 +39,16 @@ export type Project = {
 }
 
 export type Member = {
+  id?: string
   name: string
   initials: string
   color: string
+  email?: string
+  role?: 'owner' | 'admin' | 'member'
+  projectIds?: string[]
+  openIssues?: number
+  completedIssues?: number
+  overdueIssues?: number
 }
 
 export const members: Member[] = [

@@ -25,6 +25,7 @@ const task = (
   stage,
   priority,
   assignee,
+  startDate: dateOffset(days - 3),
   dueDate: dateOffset(days),
   labels,
   description,

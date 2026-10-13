@@ -1,71 +1,97 @@
 # Kanban Studio
 
-**Kanban Studio**, also known as Stride, is a Jira-inspired project and issue tracker with a multi-project Kanban board. Create projects with their own issue keys, organize work across workflow stages, and discuss changes in task activity threads.
-
-> Stride is a frontend demo. Project and issue data is stored in this browser only. There is no backend, account system, or cross-device synchronization.
+Kanban Studio (Stride) is a Jira-inspired, multi-tenant project and issue tracker. Organizations are isolated workspaces; organization owners and admins manage projects, issues, and invitations, while members see projects to which they are allocated.
 
 ## Features
 
-- **Projects:** create and switch between projects, each with a unique key such as `WEB`.
-- **Kanban workflow:** Backlog, To do, In progress, Review, and Done columns.
-- **Issues:** create, edit, and delete Tasks, Stories, and Bugs with sequential keys such as `WEB-15`.
-- **Issue details:** set a summary, description, status, priority, assignee, due date, and labels.
-- **Drag and drop:** move issues between workflow columns.
-- **Comments:** add, edit, and delete comments on issues. New comments are saved immediately.
-- **Find work:** search issue keys, summaries, descriptions, labels, assignees, and comments; filter by status, priority, and assignee; sort by priority.
-- **Local persistence:** projects and issues are saved in browser `localStorage`; storage errors are surfaced in the UI.
-- **Responsive UI:** usable on desktop and smaller screens.
+- **Organization workspaces:** create an organization, switch between organizations, and invite teammates by email.
+- **Roles and allocation:** owner, admin, and member roles; assign members to projects and revoke access.
+- **Projects and issues:** create projects with unique issue keys; create, edit, and delete Tasks, Stories, and Bugs.
+- **Kanban workflow:** Backlog, To do, In progress, Review, and Done, with drag-and-drop.
+- **Planning views:** project timeline and due-date calendar.
+- **Issue details:** descriptions, priority, assignee, start and due dates, labels, and threaded comments.
+- **Find work:** search issue content and filter by status, priority, and assignee.
+- **SQL persistence:** PostgreSQL stores organizations, memberships, projects, issues, comments, sessions, and invitations.
 
 ## Requirements
 
 - Node.js **20.19+** or **22.12+**
 - npm
+- Docker Desktop (for the local PostgreSQL and Mailpit services)
 
-## Getting started
+## Local setup
 
-From the workspace root, change to the app directory, install dependencies, and start the Vite development server:
+Run these commands from the repository directory:
 
-```bash
-cd kanban-studio
+```powershell
+Copy-Item .env.example .env
+```
+
+Set a private local password in `.env` for `POSTGRES_PASSWORD` and use the same value in `DATABASE_URL` (the password portion of the PostgreSQL URL). Do not commit `.env`.
+
+Start PostgreSQL and Mailpit, install dependencies, apply the database migration, and run the app:
+
+```powershell
+docker compose up -d database mailpit
 npm ci
+npm run db:migrate
 npm run dev
 ```
 
-If you are already in the `kanban-studio` directory, start at `npm ci`.
+Open <http://localhost:5173>. The API is available through Vite's `/api` proxy. Mailpit's inbox is at <http://localhost:8025>; invitations sent locally can be accepted from that inbox. For SMTP in another environment, configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, optional `SMTP_USER`/`SMTP_PASSWORD`, and `MAIL_FROM`.
 
-Open the local URL printed by Vite.
+The API reads `.env` in its development and migration scripts. `APP_ORIGIN` must match the browser origin used for the app. For a deployed frontend/API pair, configure an HTTPS origin, secure cookie settings, a managed PostgreSQL connection, and a real SMTP provider; do not expose the database publicly.
 
 ## Scripts
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Start the development server |
-| `npm run lint` | Lint application source with Oxlint |
-| `npm run build` | Type-check the app and create a production build in `dist/` |
-| `npm run preview` | Serve the production build locally |
+| `npm run dev` | Run the API and Vite development server |
+| `npm run dev:api` | Run only the API in watch mode |
+| `npm run dev:web` | Run only the Vite frontend |
+| `npm run db:migrate` | Apply pending SQL migrations |
+| `npm run lint` | Lint frontend source |
+| `npm run lint:server` | Lint API source |
+| `npm test` | Run server unit tests |
+| `npm run test:integration` | Run tenant-isolation tests against the configured PostgreSQL database |
+| `npm run typecheck:server` | Type-check API source |
+| `npm run build` | Type-check and build the frontend |
+| `npm run preview` | Preview the production frontend build |
 
-## Tech stack
+## Stack
 
-- React 19 and TypeScript
-- Vite 8
-- Lucide React icons
-- Browser `localStorage`
+- React 19, TypeScript, Vite, and Lucide
+- Node.js, Express 5, and PostgreSQL
+- Password hashing with Node.js `scrypt`; opaque session and invitation tokens are stored as hashes
+- Nodemailer for invitation email delivery
+
+## Tenant and role model
+
+An organization is a tenant. Projects, issues, comments, invitations, and memberships are scoped to that organization in the API and relational schema. Owners manage the organization and can appoint admins. Owners and admins can create projects, invite members, and allocate project access; only owners can grant or change the admin role. Members can access allocated projects. Removing a member revokes their organization membership and unassigns their issues.
+
+The current sign-in is email plus password. WebAuthn/passkey authentication is not implemented. PostgreSQL is in the same database family used by Supabase, so the schema can be migrated there; this app currently uses its own API sessions and authorization checks, not Supabase Auth or Row Level Security. Tenant isolation therefore depends on the API's scoped SQL and should be covered by integration tests before production use.
 
 ## Project structure
 
 ```text
+server/
+├── app.ts                 # Auth, tenant-scoped API, and role checks
+├── migrations/            # PostgreSQL schema migrations
+├── tests/                 # API/server unit tests
+├── config.ts              # Validated environment configuration
+├── mailer.ts              # Organization invitation email
+├── migrate.ts             # SQL migration runner
+└── security.ts            # Password and token helpers
 src/
-├── App.tsx        # Workspace, Kanban board, project and issue workflows
-├── data.ts        # Starter project and example issues
-├── main.tsx       # React entry point
-├── styles.css     # Responsive UI and Jira-inspired design
-├── types.ts       # Project, issue, stage, priority, and comment types
-└── useProjects.ts # Validated localStorage persistence
+├── App.tsx                # Board, timeline, calendar, team, and issue workflows
+├── AuthScreen.tsx         # Registration, sign-in, and invitation acceptance
+├── api.ts                 # Same-origin API client
+├── useWorkspace.ts        # Authentication and organization workspace state
+├── styles.css             # Responsive Jira-inspired interface
+└── types.ts               # Project, issue, membership, and comment types
 ```
 
-## Data and limitations
+## Notes
 
-- Starter project data is loaded on first use. After that, changes are saved under the `stride-kanban-projects-v1` localStorage key for this site and browser profile.
-- To start fresh, remove that key from the browser's developer tools under **Application/Storage → Local Storage**. This deletes the saved projects for this app in that browser.
-- Assignees are sample team members. There is no real user management, notifications, permissions, backend API, or collaboration between browsers.
-- Jira is a product of Atlassian. Stride is an independent demo and is not affiliated with or endorsed by Atlassian.
+- Do not put production credentials in source control. `.env` is ignored by Git; `.env.example` contains placeholders only.
+- Jira is a product of Atlassian. Kanban Studio is an independent application and is not affiliated with or endorsed by Atlassian.

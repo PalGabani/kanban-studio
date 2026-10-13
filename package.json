@@ -4,22 +4,39 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "concurrently -k \"node --env-file-if-exists=.env --import tsx --watch server/index.ts\" \"vite --host 0.0.0.0\"",
+    "dev:api": "node --env-file-if-exists=.env --import tsx --watch server/index.ts",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "tsc -b && npm run typecheck:server && vite build",
     "lint": "oxlint src",
+    "lint:server": "oxlint server",
+    "typecheck:server": "tsc --noEmit --project tsconfig.server.json",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx server/migrate.ts",
+    "test": "tsx --test server/tests/security.test.ts",
+    "test:integration": "node --env-file-if-exists=.env --import tsx --test server/tests/api.integration.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
     "lucide-react": "^1.55.0",
+    "nodemailer": "^10.1.0",
+    "pg": "^8.16.3",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/nodemailer": "^6.4.19",
+    "@types/pg": "^8.15.5",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^9.2.1",
     "oxlint": "^1.81.0",
+    "tsx": "^4.20.6",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }
