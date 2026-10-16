@@ -11,6 +11,12 @@ export type Comment = {
   createdAt: string
 }
 
+export type Subtask = {
+  id: string
+  title: string
+  completed: boolean
+}
+
 export type Task = {
   id: string
   key?: string
@@ -25,6 +31,7 @@ export type Task = {
   dueDate: string
   labels: string[]
   comments: Comment[]
+  subtasks: Subtask[]
 }
 
 export type Project = {

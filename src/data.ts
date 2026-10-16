@@ -30,6 +30,7 @@ const task = (
   labels,
   description,
   comments: [],
+  subtasks: [],
 })
 
 export const starterProjects: Project[] = [
@@ -63,3 +64,14 @@ starterProjects[0].tasks.forEach((task, index) => {
   task.key = `WEB-${index + 1}`
   task.issueType = index === 2 ? 'Bug' : index === 1 || index === 7 ? 'Story' : 'Task'
 })
+
+starterProjects[0].tasks[3].subtasks = [
+  { id: 'sub-01', title: 'Draft IA tree for primary sections', completed: true },
+  { id: 'sub-02', title: 'Validate mobile mega-menu ergonomics', completed: false },
+]
+
+starterProjects[0].tasks[6].subtasks = [
+  { id: 'sub-03', title: 'Establish color contrast ratios (WCAG AAA)', completed: true },
+  { id: 'sub-04', title: 'Define responsive grid breakpoints', completed: true },
+  { id: 'sub-05', title: 'Export Figma component tokens', completed: false },
+]

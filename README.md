@@ -9,9 +9,9 @@ Kanban Studio (Stride) is a Jira-inspired, multi-tenant project and issue tracke
 - **Projects and issues:** create projects with unique issue keys; create, edit, and delete Tasks, Stories, and Bugs.
 - **Kanban workflow:** Backlog, To do, In progress, Review, and Done, with drag-and-drop.
 - **Planning views:** project timeline and due-date calendar.
-- **Issue details:** descriptions, priority, assignee, start and due dates, labels, and threaded comments.
-- **Find work:** search issue content and filter by status, priority, and assignee.
-- **SQL persistence:** PostgreSQL stores organizations, memberships, projects, issues, comments, sessions, and invitations.
+- **Issue details:** descriptions, priority, assignee, start and due dates, labels, subtasks and acceptance criteria checklists, and threaded comments.
+- **Find work:** search issue content and subtasks, filter by status, priority, and assignee.
+- **SQL persistence:** PostgreSQL stores organizations, memberships, projects, issues, subtasks, comments, sessions, and invitations.
 
 ## Requirements
 

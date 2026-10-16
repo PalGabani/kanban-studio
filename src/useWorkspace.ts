@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from './api'
-import type { Member, Project, Task } from './types'
+import type { Member, Project, Subtask, Task } from './types'
 
 export type OrganizationRole = 'owner' | 'admin' | 'member'
 
@@ -55,11 +55,17 @@ function issuePayload(task: Task) {
     startDate: task.startDate ?? '',
     dueDate: task.dueDate ?? '',
     labels: task.labels,
+    subtasks: (task.subtasks ?? []).map((s) => ({
+      id: s.id,
+      title: s.title,
+      completed: s.completed,
+    })),
   }
 }
 
 function issueFields(task: Task) {
-  return JSON.stringify(issuePayload(task))
+  const { subtasks: _, ...rest } = issuePayload(task)
+  return JSON.stringify(rest)
 }
 
 export function useWorkspace() {
@@ -268,6 +274,31 @@ export function useWorkspace() {
     await refreshWorkspace()
   }), [organizationId, refreshWorkspace, run])
 
+  const addSubtask = useCallback((issueId: string, title: string) => run(async () => {
+    if (!organizationId) throw new Error('Select an organization first.')
+    const subtask = await apiRequest<Subtask>(`/api/organizations/${organizationId}/issues/${issueId}/subtasks`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    })
+    await refreshWorkspace()
+    return subtask
+  }), [organizationId, refreshWorkspace, run])
+
+  const toggleSubtask = useCallback((subtaskId: string, completed: boolean) => run(async () => {
+    if (!organizationId) throw new Error('Select an organization first.')
+    await apiRequest(`/api/organizations/${organizationId}/subtasks/${subtaskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ completed }),
+    })
+    await refreshWorkspace()
+  }), [organizationId, refreshWorkspace, run])
+
+  const deleteSubtask = useCallback((subtaskId: string) => run(async () => {
+    if (!organizationId) throw new Error('Select an organization first.')
+    await apiRequest(`/api/organizations/${organizationId}/subtasks/${subtaskId}`, { method: 'DELETE' })
+    await refreshWorkspace()
+  }), [organizationId, refreshWorkspace, run])
+
   return {
     user,
     organizations,
@@ -295,5 +326,8 @@ export function useWorkspace() {
     addComment,
     editComment,
     deleteComment,
+    addSubtask,
+    toggleSubtask,
+    deleteSubtask,
   }
 }

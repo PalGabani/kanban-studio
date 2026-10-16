@@ -20,6 +20,7 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  SquareCheck,
   Target,
   Trash2,
   Users,
@@ -153,6 +154,7 @@ function App() {
   const [newComment, setNewComment] = useState('')
   const [editingCommentId, setEditingCommentId] = useState('')
   const [editCommentText, setEditCommentText] = useState('')
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('')
   const [draggedTaskId, setDraggedTaskId] = useState('')
   const searchInput = useRef<HTMLInputElement>(null)
 
@@ -166,6 +168,7 @@ function App() {
         task.description,
         task.assignee,
         ...task.labels,
+        ...(task.subtasks ?? []).map((s) => s.title),
         ...task.comments.map((comment) => comment.body),
       ].some((text) => text.toLowerCase().includes(needle))
       const matchesPriority = priorityFilter === 'All priorities' || task.priority === priorityFilter
@@ -216,16 +219,24 @@ function App() {
       dueDate,
       labels: [],
       comments: [],
+      subtasks: [],
     })
     setTaskIsNew(true)
     setNewComment('')
+    setNewSubtaskTitle('')
   }
 
   const openTask = (task: Task) => {
-    setTaskDraft({ ...task, labels: [...task.labels], comments: [...task.comments] })
+    setTaskDraft({
+      ...task,
+      labels: [...task.labels],
+      comments: [...task.comments],
+      subtasks: [...(task.subtasks ?? [])],
+    })
     setTaskIsNew(false)
     setNewComment('')
     setEditingCommentId('')
+    setNewSubtaskTitle('')
   }
 
   const saveTask = (event: FormEvent<HTMLFormElement>) => {
@@ -324,6 +335,71 @@ function App() {
         ...taskDraft,
         comments: taskDraft.comments.filter((comment) => comment.id !== commentId),
       })
+    } catch {
+      return
+    }
+  }
+
+  const addSubtask = async (event?: FormEvent) => {
+    if (event) event.preventDefault()
+    const title = newSubtaskTitle.trim()
+    if (!title || !taskDraft) return
+    if (taskIsNew) {
+      setTaskDraft((current) => current ? {
+        ...current,
+        subtasks: [...(current.subtasks ?? []), { id: makeId(), title, completed: false }],
+      } : null)
+      setNewSubtaskTitle('')
+      return
+    }
+    try {
+      const subtask = await workspace.addSubtask(taskDraft.id, title)
+      setTaskDraft((current) => current ? {
+        ...current,
+        subtasks: [...(current.subtasks ?? []), subtask],
+      } : null)
+      setNewSubtaskTitle('')
+    } catch {
+      return
+    }
+  }
+
+  const toggleSubtask = async (subtaskId: string, currentCompleted: boolean) => {
+    if (!taskDraft) return
+    const nextCompleted = !currentCompleted
+    if (taskIsNew) {
+      setTaskDraft((current) => current ? {
+        ...current,
+        subtasks: (current.subtasks ?? []).map((s) => s.id === subtaskId ? { ...s, completed: nextCompleted } : s),
+      } : null)
+      return
+    }
+    try {
+      setTaskDraft((current) => current ? {
+        ...current,
+        subtasks: (current.subtasks ?? []).map((s) => s.id === subtaskId ? { ...s, completed: nextCompleted } : s),
+      } : null)
+      await workspace.toggleSubtask(subtaskId, nextCompleted)
+    } catch {
+      return
+    }
+  }
+
+  const deleteSubtask = async (subtaskId: string) => {
+    if (!taskDraft) return
+    if (taskIsNew) {
+      setTaskDraft((current) => current ? {
+        ...current,
+        subtasks: (current.subtasks ?? []).filter((s) => s.id !== subtaskId),
+      } : null)
+      return
+    }
+    try {
+      setTaskDraft((current) => current ? {
+        ...current,
+        subtasks: (current.subtasks ?? []).filter((s) => s.id !== subtaskId),
+      } : null)
+      await workspace.deleteSubtask(subtaskId)
     } catch {
       return
     }
@@ -745,9 +821,26 @@ function App() {
                           <span className="task-title">{task.title}</span>
                           {task.description && <span className="task-description">{task.description}</span>}
                           {task.labels.length > 0 && <span className="task-labels">{task.labels.slice(0, 3).map((label) => <span className={`label-chip label-${label.toLowerCase().replace(/[^a-z0-9]/g, '-')}`} key={label}>{label}</span>)}</span>}
+                          {task.subtasks && task.subtasks.length > 0 && (
+                            <span className="card-subtask-progress" aria-hidden="true" title={`${task.subtasks.filter((s) => s.completed).length} of ${task.subtasks.length} subtasks completed`}>
+                              <span
+                                className={`card-subtask-progress-bar${task.subtasks.every((s) => s.completed) ? ' all-done' : ''}`}
+                                style={{ width: `${Math.round((task.subtasks.filter((s) => s.completed).length / task.subtasks.length) * 100)}%` }}
+                              />
+                            </span>
+                          )}
                           <span className="task-card-footer">
                             <span className={`due-date${overdue ? ' overdue' : ''}`}><Clock3 size={13} />{dateLabel(task.dueDate)}</span>
                             <span className="task-card-meta">
+                              {task.subtasks && task.subtasks.length > 0 && (
+                                <span
+                                  className={`subtask-count${task.subtasks.every((s) => s.completed) ? ' completed' : ''}`}
+                                  title={`${task.subtasks.filter((s) => s.completed).length} of ${task.subtasks.length} subtasks completed`}
+                                >
+                                  <SquareCheck size={12} />
+                                  {task.subtasks.filter((s) => s.completed).length}/{task.subtasks.length}
+                                </span>
+                              )}
                               {task.comments.length > 0 && <span className="comment-count"><MessageCircle size={13} />{task.comments.length}</span>}
                               <span className={`avatar avatar-${member.color} card-avatar`} title={member.name}>{member.initials}</span>
                             </span>
@@ -826,6 +919,74 @@ function App() {
               </div>
               <label className="field-label" htmlFor="task-labels">Labels <span className="optional-label">Separate with commas</span></label>
               <input id="task-labels" className="text-input" placeholder="Design, Research, Engineering" value={taskDraft.labels.join(', ')} onChange={(event) => setTaskDraft({ ...taskDraft, labels: [...new Set(event.target.value.split(',').map((label) => label.trim()).filter(Boolean))].slice(0, 6) })} />
+
+              <div className="subtasks-section">
+                <div className="subtasks-heading">
+                  <strong><SquareCheck size={15} /> Subtasks & acceptance criteria</strong>
+                  {taskDraft.subtasks && taskDraft.subtasks.length > 0 && (
+                    <div className="subtasks-progress-wrap">
+                      <span>{taskDraft.subtasks.filter((s) => s.completed).length} of {taskDraft.subtasks.length}</span>
+                      <div className="subtasks-progress-bar" aria-hidden="true">
+                        <div
+                          className={`subtasks-progress-fill${taskDraft.subtasks.every((s) => s.completed) ? ' all-done' : ''}`}
+                          style={{ width: `${Math.round((taskDraft.subtasks.filter((s) => s.completed).length / taskDraft.subtasks.length) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="subtasks-list">
+                  {(taskDraft.subtasks ?? []).map((subtask) => (
+                    <div className="subtask-item" key={subtask.id}>
+                      <input
+                        type="checkbox"
+                        className="subtask-checkbox"
+                        checked={subtask.completed}
+                        onChange={() => void toggleSubtask(subtask.id, subtask.completed)}
+                        aria-label={`Mark subtask "${subtask.title}" as ${subtask.completed ? 'incomplete' : 'complete'}`}
+                      />
+                      <span className={`subtask-text${subtask.completed ? ' completed' : ''}`}>{subtask.title}</span>
+                      <button
+                        type="button"
+                        className="subtask-delete-btn"
+                        aria-label={`Delete subtask "${subtask.title}"`}
+                        title="Delete subtask"
+                        onClick={() => void deleteSubtask(subtask.id)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  {(!taskDraft.subtasks || taskDraft.subtasks.length === 0) && (
+                    <div className="no-subtasks">No subtasks yet. Break this issue down into smaller steps.</div>
+                  )}
+                </div>
+
+                <div className="subtask-composer">
+                  <input
+                    type="text"
+                    className="text-input"
+                    placeholder="Add a subtask or criterion... (press Enter)"
+                    value={newSubtaskTitle}
+                    onChange={(event) => setNewSubtaskTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void addSubtask()
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="button button-secondary subtask-add-button"
+                    onClick={() => void addSubtask()}
+                    disabled={!newSubtaskTitle.trim()}
+                  >
+                    <Plus size={14} /> Add
+                  </button>
+                </div>
+              </div>
 
               {!taskIsNew && (
                 <div className="comments-section">

@@ -467,7 +467,19 @@ app.get('/api/organizations/:organizationId/workspace', async (req, res) => {
                     'createdAt', c.created_at
                   ) ORDER BY c.created_at) FILTER (WHERE c.id IS NOT NULL),
                   '[]'::json
-                ) AS comments
+                ) AS comments,
+                COALESCE(
+                  (
+                    SELECT json_agg(json_build_object(
+                      'id', s.id,
+                      'title', s.title,
+                      'completed', s.completed
+                    ) ORDER BY s.position, s.created_at)
+                    FROM issue_subtasks s
+                    WHERE s.issue_id = i.id AND s.organization_id = i.organization_id
+                  ),
+                  '[]'::json
+                ) AS subtasks
          FROM issues i
          JOIN projects p ON p.id = i.project_id AND p.organization_id = i.organization_id
          LEFT JOIN users assignee ON assignee.id = i.assignee_id
@@ -499,6 +511,7 @@ app.get('/api/organizations/:organizationId/workspace', async (req, res) => {
       dueDate: dueDate ? dateOnly(dueDate) : '',
       labels: row.labels,
       comments: row.comments,
+      subtasks: row.subtasks ?? [],
     })
     tasksByProject.set(row.project_id as string, tasks)
   }
@@ -641,6 +654,12 @@ async function getAccessibleProject(organizationId: string, projectId: string, a
   return result.rows[0] ? { role, projectId: result.rows[0].id } : null
 }
 
+const subtaskInputSchema = z.object({
+  id: uuidSchema.optional(),
+  title: z.string().trim().min(1).max(255),
+  completed: z.boolean().default(false),
+})
+
 const issueSchema = z.object({
   id: uuidSchema.optional(),
   title: z.string().trim().min(1).max(200),
@@ -652,6 +671,7 @@ const issueSchema = z.object({
   startDate: z.union([z.literal(''), z.iso.date()]).default(''),
   dueDate: z.union([z.literal(''), z.iso.date()]).default(''),
   labels: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
+  subtasks: z.array(subtaskInputSchema).default([]),
 }).refine((issue) => !issue.startDate || !issue.dueDate || issue.startDate <= issue.dueDate, {
   message: 'Start date must not be after the due date.',
 })
@@ -687,6 +707,16 @@ app.post('/api/organizations/:organizationId/projects/:projectId/issues', async 
        RETURNING id, issue_number`,
       [input.id ?? null, organizationId, projectId.data, number.rows[0].issue_counter, input.issueType, input.title, input.description, input.stage, input.priority, input.assigneeId, input.startDate, input.dueDate, input.labels, auth.userId],
     )
+    if (input.subtasks && input.subtasks.length > 0) {
+      for (let i = 0; i < input.subtasks.length; i++) {
+        const item = input.subtasks[i]
+        await client.query(
+          `INSERT INTO issue_subtasks (id, organization_id, issue_id, title, completed, position)
+           VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6)`,
+          [item.id ?? null, organizationId, issue.rows[0].id, item.title, item.completed, i],
+        )
+      }
+    }
     await client.query('COMMIT')
     res.status(201).json({ id: issue.rows[0].id, key: `${(await getProjectKey(projectId.data, organizationId))}-${issue.rows[0].issue_number}` })
   } catch (error) {
@@ -865,6 +895,125 @@ app.delete('/api/organizations/:organizationId/comments/:commentId', async (req,
   )
   if (!result.rowCount) {
     res.status(404).json({ error: 'Comment not found or cannot be deleted by this account.' })
+    return
+  }
+  res.status(204).end()
+})
+
+const subtaskSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  completed: z.boolean().default(false),
+})
+
+const updateSubtaskSchema = z.object({
+  title: z.string().trim().min(1).max(255).optional(),
+  completed: z.boolean().optional(),
+}).strict().refine((data) => data.title !== undefined || data.completed !== undefined, {
+  message: 'At least one field must be provided.',
+})
+
+app.post('/api/organizations/:organizationId/issues/:issueId/subtasks', async (req, res) => {
+  const auth = requireAuth(req, res)
+  const organizationId = parseOrganizationId(req, res)
+  const issueId = uuidSchema.safeParse(req.params.issueId)
+  const parsed = subtaskSchema.safeParse(req.body)
+  if (!auth || !organizationId) return
+  if (!issueId.success || !parsed.success) {
+    res.status(400).json({ error: 'Subtask is invalid.' })
+    return
+  }
+  const issue = await pool.query<{ project_id: string }>(
+    'SELECT project_id FROM issues WHERE id = $1 AND organization_id = $2',
+    [issueId.data, organizationId],
+  )
+  const project = issue.rows[0] ? await getAccessibleProject(organizationId, issue.rows[0].project_id, auth) : null
+  if (!project) {
+    res.status(404).json({ error: 'Issue not found.' })
+    return
+  }
+  const posResult = await pool.query<{ next_pos: number }>(
+    'SELECT COALESCE(MAX(position) + 1, 0) AS next_pos FROM issue_subtasks WHERE issue_id = $1 AND organization_id = $2',
+    [issueId.data, organizationId],
+  )
+  const position = posResult.rows[0]?.next_pos ?? 0
+  const result = await pool.query(
+    `INSERT INTO issue_subtasks (organization_id, issue_id, title, completed, position)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, title, completed`,
+    [organizationId, issueId.data, parsed.data.title, parsed.data.completed, position],
+  )
+  res.status(201).json(result.rows[0])
+})
+
+app.patch('/api/organizations/:organizationId/subtasks/:subtaskId', async (req, res) => {
+  const auth = requireAuth(req, res)
+  const organizationId = parseOrganizationId(req, res)
+  const subtaskId = uuidSchema.safeParse(req.params.subtaskId)
+  const parsed = updateSubtaskSchema.safeParse(req.body)
+  if (!auth || !organizationId) return
+  if (!subtaskId.success || !parsed.success) {
+    res.status(400).json({ error: 'Subtask update is invalid.' })
+    return
+  }
+  const fields: string[] = []
+  const values: unknown[] = [subtaskId.data, organizationId, auth.userId]
+  let idx = 4
+  if (parsed.data.title !== undefined) {
+    fields.push(`title = $${idx++}`)
+    values.push(parsed.data.title)
+  }
+  if (parsed.data.completed !== undefined) {
+    fields.push(`completed = $${idx++}`)
+    values.push(parsed.data.completed)
+  }
+  fields.push('updated_at = now()')
+
+  const result = await pool.query(
+    `UPDATE issue_subtasks s SET ${fields.join(', ')}
+     WHERE s.id = $1 AND s.organization_id = $2
+       AND EXISTS (
+         SELECT 1 FROM issues i
+         WHERE i.id = s.issue_id AND i.organization_id = s.organization_id
+           AND (
+             EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = i.organization_id AND m.user_id = $3 AND m.role IN ('owner', 'admin'))
+             OR EXISTS (SELECT 1 FROM project_memberships pm WHERE pm.organization_id = i.organization_id AND pm.project_id = i.project_id AND pm.user_id = $3)
+           )
+       )
+     RETURNING s.id, s.title, s.completed`,
+    values,
+  )
+  if (!result.rowCount) {
+    res.status(404).json({ error: 'Subtask not found or cannot be edited by this account.' })
+    return
+  }
+  res.status(200).json(result.rows[0])
+})
+
+app.delete('/api/organizations/:organizationId/subtasks/:subtaskId', async (req, res) => {
+  const auth = requireAuth(req, res)
+  const organizationId = parseOrganizationId(req, res)
+  const subtaskId = uuidSchema.safeParse(req.params.subtaskId)
+  if (!auth || !organizationId) return
+  if (!subtaskId.success) {
+    res.status(400).json({ error: 'Subtask ID is invalid.' })
+    return
+  }
+  const result = await pool.query(
+    `DELETE FROM issue_subtasks s
+     WHERE s.id = $1 AND s.organization_id = $2
+       AND EXISTS (
+         SELECT 1 FROM issues i
+         WHERE i.id = s.issue_id AND i.organization_id = s.organization_id
+           AND (
+             EXISTS (SELECT 1 FROM organization_memberships m WHERE m.organization_id = i.organization_id AND m.user_id = $3 AND m.role IN ('owner', 'admin'))
+             OR EXISTS (SELECT 1 FROM project_memberships pm WHERE pm.organization_id = i.organization_id AND pm.project_id = i.project_id AND pm.user_id = $3)
+           )
+       )
+     RETURNING s.id`,
+    [subtaskId.data, organizationId, auth.userId],
+  )
+  if (!result.rowCount) {
+    res.status(404).json({ error: 'Subtask not found or cannot be deleted by this account.' })
     return
   }
   res.status(204).end()
